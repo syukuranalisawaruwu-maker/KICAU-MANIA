@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>KICAU MANIA DETECTOR</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+
+<style>
+  :root {
+    --bg: #000000;
+    --green: #00ff41;
+    --cyan: #00e5ff;
+    --green-dim: #00aa2a;
+    --cyan-dim: #0099bb;
+    --red: #ff2244;
+    --yellow: #ffcc00;
+    --panel-bg: rgba(0,20,10,0.85);
+    --border: rgba(0,255,65,0.3);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--green);
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    position: relative;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,255,65,0.02) 2px,
+      rgba(0,255,65,0.02) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* === LOADING SCREEN === */
+  #loadingScreen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9000;
+    gap: 24px;
+    transition: opacity 0.5s;
+  }
+  #loadingScreen.hidden { opacity: 0; pointer-events: none; }
+
+  .loading-title {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(1.4rem, 4vw, 2.5rem);
+    font-weight: 900;
+    color: var(--green);
+    text-shadow: 0 0 20px var(--green), 0 0 40px var(--green);
+    letter-spacing: 4px;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .loading-sub {
+    font-size: 0.8rem;
+    color: var(--cyan);
+    letter-spacing: 2px;
+    opacity: 0.7;
+  }
+
+  .progress-wrap {
+    width: min(400px, 80vw);
+    border: 1px solid var(--green);
+    border-radius: 2px;
+    height: 8px;
+    background: rgba(0,255,65,0.08);
+    overflow: hidden;
+    box-shadow: 0 0 10px rgba(0,255,65,0.3);
+  }
+  #progressBar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--green), var(--cyan));
+    transition: width 0.3s;
+    box-shadow: 0 0 12px var(--cyan);
+  }
+
+  #loadingStatus {
+    font-size: 0.72rem;
+    color: var(--green-dim);
+    letter-spacing: 1px;
+    min-height: 1.2em;
+  }
+
+  /* === MAIN LAYOUT === */
+  #app {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* === HEADER === */
+  #header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    background: var(--panel-bg);
+    border-bottom: 1px solid var(--border);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    backdrop-filter: blur(6px);
+  }
+
+  .header-title {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(0.7rem, 2vw, 1rem);
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px var(--green);
+  }
+
+  .status-dots {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .dot-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+    color: var(--green-dim);
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #333;
+    border: 1px solid #555;
+    transition: all 0.3s;
+  }
+  .dot.active {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green), 0 0 16px var(--green);
+    border-color: var(--green);
+  }
+  .dot.active-cyan {
+    background: var(--cyan);
+    box-shadow: 0 0 8px var(--cyan), 0 0 16px var(--cyan);
+    border-color: var(--cyan);
+  }
+  .dot.active-red {
+    background: var(--red);
+    box-shadow: 0 0 8px var(--red), 0 0 16px var(--red);
+    border-color: var(--red);
+    animation: blink 0.5s infinite;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* === CANVAS AREA === */
+  #canvasWrap {
+    position: fixed;
+    inset: 44px 0 40px 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+  }
+
+  video#webcam {
+    position: absolute;
+    opacity: 0;
+    width: 640px;
+    height: 480px;
+    top: 0; left: 0;
+  }
+
+  canvas#outputCanvas {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    border: 1px solid rgba(0,255,65,0.2);
+    box-shadow: 0 0 30px rgba(0,255,65,0.1), inset 0 0 30px rgba(0,0,0,0.5);
+  }
+
+  /* === FOOTER === */
+  #footer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 100;
+    background: var(--panel-bg);
+    border-top: 1px solid var(--border);
+    padding: 6px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    backdrop-filter: blur(6px);
+    font-size: 0.65rem;
+  }
+
+  .footer-item {
+    color: var(--cyan-dim);
+    letter-spacing: 1px;
+  }
+  .footer-val {
+    color: var(--cyan);
+    font-weight: bold;
+  }
+  .footer-warn { color: var(--yellow); }
+
+  /* === KICAU BANNER === */
+  #kicauBanner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 500;
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(1.8rem, 6vw, 4rem);
+    font-weight: 900;
+    color: var(--cyan);
+    text-shadow:
+      0 0 10px var(--cyan),
+      0 0 30px var(--cyan),
+      0 0 60px rgba(0,229,255,0.5);
+    letter-spacing: 6px;
+    text-align: center;
+    pointer-events: none;
+    display: none;
+    animation: glitch 0.15s infinite;
+    white-space: nowrap;
+  }
+  #kicauBanner.show { display: block; }
+
+  @keyframes glitch {
+    0%   { text-shadow: 0 0 10px var(--cyan), 0 0 30px var(--cyan); transform: translate(-50%,-50%) skewX(0deg); }
+    20%  { text-shadow: -3px 0 var(--red), 3px 0 var(--green); transform: translate(calc(-50% + 3px),-50%) skewX(-1deg); }
+    40%  { text-shadow: 3px 0 var(--red), -3px 0 var(--cyan); transform: translate(calc(-50% - 3px),-50%) skewX(1deg); }
+    60%  { text-shadow: 0 0 10px var(--green), 0 0 30px var(--green); transform: translate(-50%,-50%) skewX(0deg); }
+    80%  { text-shadow: -2px 0 var(--cyan), 2px 0 var(--red); transform: translate(calc(-50% + 2px),-50%); }
+    100% { text-shadow: 0 0 10px var(--cyan), 0 0 30px var(--cyan); transform: translate(-50%,-50%); }
+  }
+
+  /* === CAT GIFs === */
+  .cat-gif {
+    position: fixed;
+    width: 60px;
+    height: 60px;
+    object-fit: contain;
+    display: none;
+    z-index: 400;
+    image-rendering: pixelated;
+    filter: drop-shadow(0 0 8px var(--cyan));
+  }
+  .cat-gif.active {
+    display: block;
+    animation: bounce 0.6s ease infinite alternate;
+  }
+
+  .cat-1 { top: 80px;  left: 380px;  animation-delay: 0s !important; }
+  .cat-2 { top: 80px;  right: 380px; animation-delay: 0.1s !important; }
+  .cat-3 { bottom: 50px; left: 380px;  animation-delay: 0.2s !important; }
+  .cat-4 { bottom: 50px; right: 380px; animation-delay: 0.3s !important; }
+  .cat-5 { top: 20%;  left: 650px;  transform: translateY(-50%); animation-delay: 0.4s !important; }
+  .cat-6 { top: 80%;  right: 650px; transform: translateY(-50%); animation-delay: 0.5s !important; }
+
+  @keyframes bounce {
+    0%   { transform: translateY(0px); }
+    100% { transform: translateY(-16px); }
+  }
+  .cat-5.active, .cat-6.active {
+    animation: bounce-mid 0.6s ease infinite alternate;
+  }
+  .cat-5.active { animation-delay: 0.4s; }
+  .cat-6.active { animation-delay: 0.5s; }
+  @keyframes bounce-mid {
+    0%   { transform: translateY(calc(-50% + 0px)); }
+    100% { transform: translateY(calc(-50% - 16px)); }
+  }
+
+  /* === INFO PANEL (kanan bawah) === */
+  #infoPanel {
+    position: fixed;
+    bottom: 50px;
+    right: 10px;
+    z-index: 200;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    font-size: 0.62rem;
+    color: var(--green-dim);
+    letter-spacing: 1px;
+    line-height: 1.8;
+    backdrop-filter: blur(4px);
+    min-width: 160px;
+  }
+  #infoPanel .val { color: var(--green); }
+  #infoPanel .title-panel {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.6rem;
+    color: var(--cyan);
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+    letter-spacing: 2px;
+  }
+
+  /* Corner decorations */
+  .corner {
+    position: fixed;
+    width: 20px;
+    height: 20px;
+    z-index: 150;
+    opacity: 0.5;
+  }
+  .corner-tl { top: 44px; left: 0; border-top: 2px solid var(--cyan); border-left: 2px solid var(--cyan); }
+  .corner-tr { top: 44px; right: 0; border-top: 2px solid var(--cyan); border-right: 2px solid var(--cyan); }
+  .corner-bl { bottom: 40px; left: 0; border-bottom: 2px solid var(--cyan); border-left: 2px solid var(--cyan); }
+  .corner-br { bottom: 40px; right: 0; border-bottom: 2px solid var(--cyan); border-right: 2px solid var(--cyan); }
+</style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loadingScreen">
+  <div class="loading-title">⟩⟩ KICAU MANIA DETECTOR ⟨⟨</div>
+  <div class="loading-sub">INITIALIZING NEURAL HAND-FACE MATRIX...</div>
+  <div class="progress-wrap">
+    <div id="progressBar"></div>
+  </div>
+  <div id="loadingStatus">Booting MediaPipe subsystems...</div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <div class="header-title">⟩ KICAU MANIA DETECTOR v2.0</div>
+  <div class="status-dots">
+    <div class="dot-item"><div class="dot" id="dotCam"></div> CAM</div>
+    <div class="dot-item"><div class="dot" id="dotHand"></div> HAND</div>
+    <div class="dot-item"><div class="dot" id="dotFace"></div> FACE</div>
+    <div class="dot-item"><div class="dot" id="dotKicau"></div> KICAU</div>
+  </div>
+</div>
+
+<!-- Corner deco -->
+<div class="corner corner-tl"></div>
+<div class="corner corner-tr"></div>
+<div class="corner corner-bl"></div>
+<div class="corner corner-br"></div>
+
+<!-- Canvas area -->
+<div id="canvasWrap">
+  <video id="webcam" muted playsinline autoplay></video>
+  <canvas id="outputCanvas" width="640" height="480"></canvas>
+</div>
+
+<!-- Info Panel -->
+<div id="infoPanel">
+  <div class="title-panel">⟩ METRICS</div>
+  <div>DIST : <span class="val" id="metricDist">--</span></div>
+  <div>THRESH : <span class="val">0.12</span></div>
+  <div>HANDS : <span class="val" id="metricHands">0</span></div>
+  <div>FACE : <span class="val" id="metricFace">--</span></div>
+  <div>MODE : <span class="val" id="metricMode">STANDBY</span></div>
+</div>
+
+<!-- Kicau Banner -->
+<div id="kicauBanner">⚡ KICAU MANIA! ⚡</div>
+
+<!-- Cat GIFs -->
+<img class="cat-gif cat-1" id="cat1" src="cat1.gif" alt="cat"/>
+<img class="cat-gif cat-2" id="cat2" src="cat2.gif" alt="cat"/>
+<img class="cat-gif cat-3" id="cat3" src="cat3.gif" alt="cat"/>
+<img class="cat-gif cat-4" id="cat4" src="cat4.gif" alt="cat"/>
+<img class="cat-gif cat-5" id="cat5" src="cat5.gif" alt="cat"/>
+<img class="cat-gif cat-6" id="cat6" src="cat6.gif" alt="cat"/>
+
+<!-- Audio -->
+<audio id="kicauAudio" loop src="kicau-mania.mp3"></audio>
+
+<!-- Footer -->
+<div id="footer">
+  <div class="footer-item">⟩ SYSTEM: <span class="footer-val">ONLINE</span></div>
+  <div class="footer-item">FPS: <span class="footer-val" id="fpsCounter">--</span></div>
+  <div class="footer-item">DIST: <span class="footer-val" id="footerDist">--</span></div>
+  <div class="footer-item">⟩ MEDIAPIPE HANDS + FACE MESH</div>
+</div>
+
+<!-- MediaPipe via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+<script>
+// =================== STATE ===================
+let isPlaying = false;
+let kicauActive = false;
+let lastFrameTime = performance.now();
+let fps = 0;
+let frameCount = 0;
+let fpsTimer = 0;
+
+// Latest landmarks
+let latestHands = null;
+let latestFace  = null;
+
+// =================== ELEMENTS ===================
+const videoEl   = document.getElementById('webcam');
+const canvas    = document.getElementById('outputCanvas');
+const ctx       = canvas.getContext('2d');
+const audio     = document.getElementById('kicauAudio');
+const banner    = document.getElementById('kicauBanner');
+const loadScrn  = document.getElementById('loadingScreen');
+const progBar   = document.getElementById('progressBar');
+const loadStat  = document.getElementById('loadingStatus');
+
+const dotCam    = document.getElementById('dotCam');
+const dotHand   = document.getElementById('dotHand');
+const dotFace   = document.getElementById('dotFace');
+const dotKicau  = document.getElementById('dotKicau');
+
+const metricDist  = document.getElementById('metricDist');
+const metricHands = document.getElementById('metricHands');
+const metricFace  = document.getElementById('metricFace');
+const metricMode  = document.getElementById('metricMode');
+const footerDist  = document.getElementById('footerDist');
+const fpsCounter  = document.getElementById('fpsCounter');
+
+const cats = [1,2,3,4,5,6].map(n => document.getElementById('cat'+n));
+
+// =================== MEDIAPIPE INIT ===================
+let handsReady = false;
+let faceReady  = false;
+
+function setProgress(pct, msg) {
+  progBar.style.width = pct + '%';
+  loadStat.textContent = msg;
+}
+
+// Hands
+const handsMP = new Hands({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+handsMP.setOptions({
+  maxNumHands: 2,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.5
+});
+handsMP.onResults(onHandsResults);
+
+// Face Mesh
+const faceMesh = new FaceMesh({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+});
+faceMesh.setOptions({
+  maxNumFaces: 1,
+  refineLandmarks: false,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.5
+});
+faceMesh.onResults(onFaceResults);
+
+// Progress simulation
+setProgress(10, 'Loading Hands model...');
+setTimeout(() => setProgress(35, 'Loading Face Mesh model...'), 600);
+setTimeout(() => setProgress(60, 'Starting webcam...'), 1200);
+
+// =================== WEBCAM ===================
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+    videoEl.srcObject = stream;
+    videoEl.onloadedmetadata = () => {
+      videoEl.play();
+      dotCam.className = 'dot active';
+      setProgress(80, 'Initializing detection pipeline...');
+      setTimeout(() => {
+        setProgress(100, 'System ready. ENGAGE!');
+        setTimeout(() => {
+          loadScrn.classList.add('hidden');
+          startProcessingLoop();
+        }, 600);
+      }, 500);
+    };
+  } catch(e) {
+    loadStat.textContent = 'ERROR: Camera access denied. ' + e.message;
+    loadStat.style.color = 'var(--red)';
+  }
+}
+
+// =================== PROCESSING LOOP ===================
+let processing = false;
+async function processFrame() {
+  if (processing) return;
+  processing = true;
+  try {
+    await handsMP.send({ image: videoEl });
+    await faceMesh.send({ image: videoEl });
+  } catch(e) {}
+  processing = false;
+
+  // Draw
+  drawFrame();
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  fpsTimer += now - lastFrameTime;
+  lastFrameTime = now;
+  if (fpsTimer >= 1000) {
+    fps = Math.round(frameCount * 1000 / fpsTimer);
+    frameCount = 0;
+    fpsTimer = 0;
+    fpsCounter.textContent = fps;
+  }
+}
+
+function startProcessingLoop() {
+  function loop() {
+    processFrame();
+    requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+// =================== RESULT HANDLERS ===================
+function onHandsResults(results) {
+  latestHands = results;
+  const count = results.multiHandLandmarks ? results.multiHandLandmarks.length : 0;
+  metricHands.textContent = count;
+  dotHand.className = count > 0 ? 'dot active' : 'dot';
+}
+
+function onFaceResults(results) {
+  latestFace = results;
+  const det = results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0;
+  metricFace.textContent = det ? 'YES' : 'NO';
+  dotFace.className = det ? 'dot active-cyan' : 'dot';
+}
+
+// =================== DETECTION LOGIC ===================
+const THRESHOLD = 0.12;
+
+// Face Mesh landmark 13 = upper lip, 14 = lower lip, let's use 13 (upper lip) or as prompt says ID 8 = upper lip area
+// MediaPipe Face Mesh: landmark 13 = lip top, but prompt says ID 8
+// We'll use landmark 13 as the mouth center (best approximation for "bibir atas")
+const FACE_MOUTH_LM = 13; // upper lip
+
+// Hand back (dorsum) = landmark 9 (middle finger MCP) is roughly hand back center
+const HAND_BACK_LM  = 9;
+
+function dist3D(a, b) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const dz = (a.z || 0) - (b.z || 0);
+  return Math.sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+function checkPose() {
+  if (!latestHands || !latestFace) return { active: false, dist: null };
+  if (!latestHands.multiHandLandmarks || latestHands.multiHandLandmarks.length === 0) return { active: false, dist: null };
+  if (!latestFace.multiFaceLandmarks || latestFace.multiFaceLandmarks.length === 0) return { active: false, dist: null };
+
+  const faceLM  = latestFace.multiFaceLandmarks[0];
+  const mouthPt = faceLM[FACE_MOUTH_LM];
+
+  let minDist = Infinity;
+  for (const handLMs of latestHands.multiHandLandmarks) {
+    const handPt = handLMs[HAND_BACK_LM];
+    const d = dist3D(mouthPt, handPt);
+    if (d < minDist) minDist = d;
+  }
+
+  return { active: minDist < THRESHOLD, dist: minDist };
+}
+
+// =================== KICAU STATE ===================
+function activateKicau() {
+  if (kicauActive) return;
+  kicauActive = true;
+  banner.classList.add('show');
+  dotKicau.className = 'dot active-red';
+  metricMode.textContent = 'KICAU MANIA!';
+  cats.forEach(c => c.classList.add('active'));
+  if (!isPlaying) {
+    audio.play().catch(() => {});
+    isPlaying = true;
+  }
+}
+
+function deactivateKicau() {
+  if (!kicauActive) return;
+  kicauActive = false;
+  banner.classList.remove('show');
+  dotKicau.className = 'dot';
+  metricMode.textContent = 'STANDBY';
+  cats.forEach(c => c.classList.remove('active'));
+  audio.pause();
+  isPlaying = false;
+}
+
+// =================== DRAWING ===================
+// Cyberpunk color palette for hands
+const LANDMARK_COLOR     = '#00ff41';
+const LANDMARK_GLOW      = 'rgba(0,255,65,0.6)';
+const CONNECTION_GRAD_A  = '#00ff41';
+const CONNECTION_GRAD_B  = '#00e5ff';
+const FACE_COLOR         = 'rgba(0,229,255,0.15)';
+const FACE_DOT_COLOR     = 'rgba(0,229,255,0.5)';
+const FACE_LINE_COLOR    = 'rgba(0,229,255,0.08)';
+
+// Hand connections (MediaPipe standard)
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+// Finger tip indices for labels
+const FINGER_TIPS = {4:'THUMB',8:'INDEX',12:'MID',16:'RING',20:'PINKY'};
+
+function toLandmarkCoords(lm, w, h) {
+  return { x: lm.x * w, y: lm.y * h };
+}
+
+function drawHand(lms, w, h, handLabel) {
+  const pts = lms.map(lm => toLandmarkCoords(lm, w, h));
+
+  // Draw connections with gradient glow
+  for (const [a, b] of HAND_CONNECTIONS) {
+    const pa = pts[a], pb = pts[b];
+    const grad = ctx.createLinearGradient(pa.x, pa.y, pb.x, pb.y);
+    grad.addColorStop(0, CONNECTION_GRAD_A);
+    grad.addColorStop(1, CONNECTION_GRAD_B);
+
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = '#00ff41';
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  }
+
+  // Draw landmark nodes
+  pts.forEach((pt, idx) => {
+    const isTip = FINGER_TIPS[idx] !== undefined;
+    const isWrist = idx === 0;
+    const r = isTip ? 5 : isWrist ? 6 : 3.5;
+    const color = isTip ? '#00e5ff' : LANDMARK_COLOR;
+
+    // Glow ring
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, r + 3, 0, Math.PI * 2);
+    ctx.fillStyle = isTip ? 'rgba(0,229,255,0.15)' : LANDMARK_GLOW;
+    ctx.fill();
+
+    // Core dot
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Label for tips
+    if (FINGER_TIPS[idx]) {
+      ctx.font = '9px "Share Tech Mono"';
+      ctx.fillStyle = '#00e5ff';
+      ctx.shadowColor = '#00e5ff';
+      ctx.shadowBlur = 6;
+      ctx.fillText(FINGER_TIPS[idx], pt.x + 6, pt.y - 6);
+      ctx.shadowBlur = 0;
+    }
+
+    // Wrist label
+    if (isWrist) {
+      ctx.font = '10px "Share Tech Mono"';
+      ctx.fillStyle = '#00ff41';
+      ctx.shadowColor = '#00ff41';
+      ctx.shadowBlur = 6;
+      ctx.fillText(handLabel, pt.x - 10, pt.y + 18);
+      ctx.shadowBlur = 0;
+    }
+  });
+}
+
+function drawFaceMesh(lms, w, h) {
+  // Draw dots only (minimalist)
+  for (const lm of lms) {
+    const x = lm.x * w, y = lm.y * h;
+    ctx.beginPath();
+    ctx.arc(x, y, 1, 0, Math.PI * 2);
+    ctx.fillStyle = FACE_DOT_COLOR;
+    ctx.fill();
+  }
+
+  // Highlight mouth landmark
+  const mouth = lms[FACE_MOUTH_LM];
+  const mx = mouth.x * w, my = mouth.y * h;
+  ctx.beginPath();
+  ctx.arc(mx, my, 5, 0, Math.PI * 2);
+  ctx.strokeStyle = '#ff2244';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#ff2244';
+  ctx.shadowBlur = 10;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.font = '9px "Share Tech Mono"';
+  ctx.fillStyle = '#ff2244';
+  ctx.fillText('MOUTH', mx + 6, my - 4);
+}
+
+function drawFrame() {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Draw mirrored webcam
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.drawImage(videoEl, -w, 0, w, h);
+  ctx.restore();
+
+  // Dark overlay for terminal feel
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, 0, w, h);
+
+  // Draw face mesh
+  if (latestFace && latestFace.multiFaceLandmarks) {
+    for (const faceLMs of latestFace.multiFaceLandmarks) {
+      // Mirror face landmarks
+      const mirrored = faceLMs.map(lm => ({ x: 1 - lm.x, y: lm.y, z: lm.z }));
+      drawFaceMesh(mirrored, w, h);
+    }
+  }
+
+  // Draw hands
+  if (latestHands && latestHands.multiHandLandmarks) {
+    latestHands.multiHandLandmarks.forEach((handLMs, idx) => {
+      const label = latestHands.multiHandedness && latestHands.multiHandedness[idx]
+        ? latestHands.multiHandedness[idx].label.toUpperCase()
+        : 'HAND';
+      // Mirror hand landmarks
+      const mirrored = handLMs.map(lm => ({ x: 1 - lm.x, y: lm.y, z: lm.z }));
+      drawHand(mirrored, w, h, label);
+    });
+  }
+
+  // Check pose
+  const { active, dist } = checkPose();
+
+  const distStr = dist !== null ? dist.toFixed(4) : '--';
+  metricDist.textContent = distStr;
+  footerDist.textContent = distStr;
+
+  if (active) {
+    activateKicau();
+    // Alert rect on canvas
+    ctx.strokeStyle = 'rgba(0,229,255,0.6)';
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#00e5ff';
+    ctx.shadowBlur = 20;
+    ctx.strokeRect(4, 4, w - 8, h - 8);
+    ctx.shadowBlur = 0;
+  } else {
+    deactivateKicau();
+  }
+
+  // Scan line effect animated
+  const scanY = (Date.now() / 8) % h;
+  const grad = ctx.createLinearGradient(0, scanY - 30, 0, scanY + 30);
+  grad.addColorStop(0, 'rgba(0,229,255,0)');
+  grad.addColorStop(0.5, 'rgba(0,229,255,0.06)');
+  grad.addColorStop(1, 'rgba(0,229,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, scanY - 30, w, 60);
+}
+
+// =================== START ===================
+startCamera();
+</script>
+</body>
+</html>
